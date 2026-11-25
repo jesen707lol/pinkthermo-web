@@ -196,5 +196,5 @@ def calcular_biomarcadores_y_riesgo(img_limpia):
     columnas = [
         'Temp_Media', 'Temp_Max', 'Temp_Min', 'Desv_Estandar',
         'Percentil_75', 'Percentil_90', 'Percentil_95', 'Ratio_Puntos_Calientes',
-        'Asimetria_Bilateral_Media', 'Asimetria_Bilateral_Max', 'Gradiente_Vascular', 'Skewness_Termico'
-        
+        'Asimetria_Bilateral_Media', 'Asimetria_Bilateral_Max', 'Gradiente_Vascular', 'Skewness_Termico']
+    
