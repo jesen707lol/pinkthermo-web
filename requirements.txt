@@ -1,0 +1,10 @@
+streamlit
+scikit-learn
+pandas
+numpy
+scipy
+joblib
+opencv-python-headless
+fpdf2
+pymupdf
+pydicom
