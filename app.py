@@ -201,19 +201,26 @@ def generar_explicacion_clinica(df_bio, riesgo, anomalia):
 
 def crear_pdf(paciente, fmt, anomalia, riesgo, df_bio, img_orig_bgr, img_c, por_que_prob, recomendacion, guia_parametros):
     pdf = FPDF()
+    pdf.set_margins(12, 12, 12)
+    pdf.set_auto_page_break(auto=True, margin=12)
     pdf.add_page()
+
     pdf.set_fill_color(141, 116, 146)
-    pdf.rect(0, 0, 210, 32, 'F')
+    pdf.rect(0, 0, 210, 30, 'F')
     pdf.set_text_color(255, 255, 255)
-    pdf.set_font("Courier", "B", 14)
-    pdf.cell(0, 12, "INFORME DE EVALUACION TERMOGRAFICA MAMARIA", ln=True, align="C")
-    pdf.set_font("Courier", "", 9)
-    pdf.cell(0, 6, "SISTEMA DE APOYO PREVENTIVO (MODELO CALIBRADO HSV+HOG+LBP - DMR-IR)", ln=True, align="C")
+    pdf.set_font("Courier", "B", 13)
+    pdf.set_xy(12, 7)
+    pdf.cell(186, 8, "INFORME DE EVALUACION TERMOGRAFICA MAMARIA", ln=True, align="C")
+    pdf.set_font("Courier", "", 8.5)
+    pdf.set_x(12)
+    pdf.cell(186, 6, "SISTEMA DE APOYO PREVENTIVO (MODELO CALIBRADO HSV+HOG+LBP - DMR-IR)", ln=True, align="C")
     pdf.ln(10)
 
     pdf.set_text_color(46, 29, 51)
-    pdf.set_font("Courier", "B", 10)
-    pdf.cell(0, 7, f"PACIENTE: {paciente.upper() if paciente else 'NO ESPECIFICADO'} | FECHA: {datetime.now().strftime('%d/%m/%Y')}", ln=True)
+    pdf.set_font("Courier", "B", 9.5)
+    pdf.set_x(12)
+    pdf.cell(186, 6, f"PACIENTE: {paciente.upper() if paciente else 'NO ESPECIFICADO'} | FECHA: {datetime.now().strftime('%d/%m/%Y')}", ln=True)
+    pdf.ln(1)
 
     if anomalia:
         pdf.set_fill_color(255, 224, 230)
@@ -223,36 +230,48 @@ def crear_pdf(paciente, fmt, anomalia, riesgo, df_bio, img_orig_bgr, img_c, por_
         pdf.set_fill_color(232, 245, 233)
         pdf.set_text_color(27, 94, 32)
         txt = f"RESULTADO: NO ENFERMA | POSIBILIDAD LATENTE DE RIESGO: {riesgo*100:.1f}%"
-    pdf.multi_cell(0, 8, txt, fill=True)
+    pdf.set_x(12)
+    pdf.multi_cell(186, 7, txt, fill=True)
     pdf.ln(3)
 
     pdf.set_text_color(40, 40, 40)
     pdf.set_font("Courier", "", 8)
-    pdf.multi_cell(0, 4.5, por_que_prob)
+    pdf.set_x(12)
+    pdf.multi_cell(186, 4.3, por_que_prob)
     pdf.ln(2)
     pdf.set_font("Courier", "B", 8)
-    pdf.multi_cell(0, 4.5, recomendacion)
-    pdf.ln(3)
+    pdf.set_x(12)
+    pdf.multi_cell(186, 4.3, recomendacion)
+    pdf.ln(4)
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tg, tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tc:
         cv2.imwrite(tg.name, img_orig_bgr)
         cv2.imwrite(tc.name, img_c)
         pg, pc = tg.name, tc.name
-    y = pdf.get_y()
-    pdf.image(pg, x=25, y=y, w=58)
-    pdf.image(pc, x=125, y=y, w=58)
-    pdf.ln(60)
+
+    y_img = pdf.get_y()
+    pdf.image(pg, x=22, y=y_img, w=68, h=52)
+    pdf.image(pc, x=118, y=y_img, w=68, h=52)
+    pdf.set_xy(12, y_img + 56)
     os.remove(pg)
     os.remove(pc)
 
     pdf.set_font("Courier", "B", 9)
-    pdf.cell(0, 6, "EXPLICACION DE BIOMARCADORES TERMICOS EVALUADOS:", ln=True)
-    pdf.set_font("Courier", "", 7.5)
+    pdf.set_text_color(46, 29, 51)
+    pdf.set_x(12)
+    pdf.cell(186, 6, "EXPLICACION DE BIOMARCADORES TERMICOS EVALUADOS:", ln=True)
+    pdf.ln(1)
+
     for nombre_p, val_p, desc_p in guia_parametros:
-        pdf.set_font("Courier", "B", 7.5)
-        pdf.cell(0, 4.5, f"* {nombre_p} [{val_p}]:", ln=True)
+        pdf.set_x(12)
+        pdf.set_font("Courier", "B", 7.8)
+        pdf.set_text_color(46, 29, 51)
+        pdf.multi_cell(186, 4.2, f"* {nombre_p} [{val_p}]:")
+        pdf.set_x(15)
         pdf.set_font("Courier", "", 7.5)
-        pdf.multi_cell(0, 4, f"  {desc_p}")
+        pdf.set_text_color(60, 60, 60)
+        pdf.multi_cell(183, 4.0, desc_p)
+        pdf.ln(0.8)
 
     return bytes(pdf.output())
 
