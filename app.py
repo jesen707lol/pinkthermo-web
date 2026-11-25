@@ -78,7 +78,6 @@ def leer_estudio(archivo):
         return bgr, f"IMAGEN (.{nombre.split('.')[-1].upper()})"
 
 def extraer_mapa_temperatura_flir(img_bgr):
-    # 1. Recortar márgenes negros/oscuros externos si es captura de pantalla
     gris_temp = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
     mask = (gris_temp > 20).astype(np.uint8)
     coords = cv2.findNonZero(mask)
@@ -88,24 +87,20 @@ def extraer_mapa_temperatura_flir(img_bgr):
             img_bgr = img_bgr[y:y+h, x:x+w]
 
     alto, ancho = img_bgr.shape[:2]
-    # Recortar barra inferior FLIR (13%), franja superior de texto (10%) y escala lateral derecha (12%)
-    recorte_bgr = img_bgr[int(alto * 0.10):int(alto * 0.87), int(ancho * 0.12):int(ancho * 0.85)]
+    # Recortar textos superiores FLIR (14%), barra inferior FLIR (14%) y escala lateral derecha (14%)
+    recorte_bgr = img_bgr[int(alto * 0.14):int(alto * 0.86), int(ancho * 0.14):int(ancho * 0.84)]
 
     b, g, r = cv2.split(recorte_bgr)
     diferencia_color = float(np.mean(np.abs(r.astype(float) - b.astype(float))))
 
-    # Si la imagen ya viene en falso color térmico FLIR (Rainbow/Ironbow: Azul=Frío, Rojo/Blanco=Caliente)
     if diferencia_color > 18.0:
         hsv = cv2.cvtColor(recorte_bgr, cv2.COLOR_BGR2HSV)
         h_ch, s_ch, v_ch = cv2.split(hsv)
-        # En escala FLIR: Hue ~120 es azul frío, Hue ~60 es verde, Hue ~30 es amarillo, Hue ~0/175 es rojo, y blanco (baja S, alta V) es calor extremo
         hue_norm = h_ch.astype(float)
-        hue_norm[hue_norm > 150] = 0.0  # Rojos altos en OpenCV (150-179) -> 0 (caliente)
-        mapa_calor = np.clip(255.0 - (hue_norm * 2.1), 0, 255)
-        # Zonas blancas brillantes (saturación baja y brillo alto) son los picos máximos de calor
-        mascara_blanco = (s_ch < 75) & (v_ch > 190)
+        hue_norm[hue_norm > 145] = 0.0
+        mapa_calor = np.clip(255.0 - (hue_norm * 2.15), 0, 255)
+        mascara_blanco = (s_ch < 80) & (v_ch > 185)
         mapa_calor[mascara_blanco] = 255.0
-        # Zonas muy oscuras son fondo frío
         mapa_calor[v_ch < 45] = 0.0
         img_termica = mapa_calor.astype(np.uint8)
     else:
@@ -128,15 +123,19 @@ def analizar_termografia(img_bgr):
     p95 = float(np.percentile(suave, 95))
     ratio = float(np.sum(suave > 215) / suave.size)
 
-    # Analizar simetría específicamente en la región mamaria central (mitad inferior del recorte)
-    zona_mamas = suave[35:115, 10:118]
-    mitad = zona_mamas.shape[1] // 2
-    izq, der = zona_mamas[:, :mitad], zona_mamas[:, mitad:]
+    # Región mamaria glandular (excluyendo pliegue inframamario inferior y cuello)
+    glandula = suave[28:92, 16:112]
+    mitad = glandula.shape[1] // 2
+    izq, der = glandula[:, :mitad], np.fliplr(glandula[:, mitad:])
+
+    # 1. Asimetría píxel a píxel estructural entre mama izquierda y derecha
+    dif_estructural = float(np.mean(np.abs(izq.astype(float) - der.astype(float))))
     asim_med = float(abs(np.mean(izq) - np.mean(der)))
     asim_max = float(abs(np.percentile(izq, 95) - np.percentile(der, 95)))
-    focos_izq = float(np.sum(izq > 220) / izq.size)
-    focos_der = float(np.sum(der > 220) / der.size)
-    asim_focos = abs(focos_izq - focos_der)
+
+    # 2. Actividad vascular / focos hipertermicos intraglandulares (redes rojas/blancas)
+    hiper_glandula = float(np.sum(glandula > 218) / glandula.size)
+    laplaciano = float(np.var(cv2.Laplacian(glandula, cv2.CV_64F)))
 
     sx = cv2.Sobel(suave, cv2.CV_64F, 1, 0, ksize=3)
     sy = cv2.Sobel(suave, cv2.CV_64F, 0, 1, ksize=3)
@@ -148,9 +147,12 @@ def analizar_termografia(img_bgr):
 
     prob_svm = float(modelo.predict_proba(escalador.transform(df))[0][1])
 
-    # Índice clínico basado en asimetría real entre mama izquierda y mama derecha + focos hipertermicos unilaterales
-    indice_asimetria = min(1.0, (asim_med / 26.0) * 0.45 + (asim_max / 38.0) * 0.30 + asim_focos * 2.5)
-    riesgo_final = min(0.985, max(0.04, 0.45 * prob_svm + 0.55 * indice_asimetria))
+    # Combinación calibrada con patrones FLIR reales (asimetría estructural + vascularización intraglandular)
+    score_asim = min(1.0, (dif_estructural / 42.0) * 0.55 + (asim_med / 22.0) * 0.45)
+    score_vasc = min(1.0, (hiper_glandula / 0.38) * 0.60 + (laplaciano / 950.0) * 0.40)
+    score_anatomico = 0.55 * score_asim + 0.45 * score_vasc
+
+    riesgo_final = min(0.985, max(0.04, 0.30 * prob_svm + 0.70 * score_anatomico))
 
     return df, riesgo_final, suave
 
@@ -199,7 +201,7 @@ st.sidebar.markdown("<div style='text-align:center; padding:8px;'><b style='font
 nombre_pac = st.sidebar.text_input("NOMBRE DE LA PACIENTE:", placeholder="EJ. SOFIA THOMPSON")
 archivo = st.sidebar.file_uploader("SUBIR ESTUDIO TERMOGRÁFICO:", type=["jpg","jpeg","png","bmp","tif","tiff","pdf","dcm"])
 paleta = st.sidebar.selectbox("PALETA TÉRMICA:", ["JET (MÉDICO CLÁSICO)", "INFERNO (ALTO CONTRASTE)", "HOT (CÁLIDO)", "VIRIDIS (SUAVE)"])
-umbral = st.sidebar.slider("UMBRAL DE ALERTA CLÍNICA (%):", 30, 60, 42, 1) / 100.0
+umbral = st.sidebar.slider("UMBRAL DE ALERTA CLÍNICA (%):", 35, 65, 45, 1) / 100.0
 st.sidebar.markdown("<div class='pill'><b>AUTOEXPLORACIÓN:</b> REALÍZALA 7 DÍAS DESPUÉS DE TU PERIODO.</div>", unsafe_allow_html=True)
 
 st.markdown(f"<div class='main-banner'><span class='bold-title'>HOLA, {nombre_pac if nombre_pac else 'BIENVENIDA'} — EVALUACIÓN PREVENTIVA MAMARIA</span><span>SISTEMA DE DETECCIÓN TEMPRANA Y ESTRATIFICACIÓN DE RIESGO (SVM + DMR-IR)</span></div>", unsafe_allow_html=True)
@@ -234,9 +236,9 @@ if archivo is not None:
         cr, cb = st.columns([1.6, 1.0])
         with cr:
             if anomalia:
-                st.error(f"**ALERTA TÉRMICA: ANOMALÍA DETECTADA (PROBABILIDAD DE ENFERMEDAD: {riesgo*100:.1f}%)**\n\nSE DETECTARON FOCOS DE HIPERTERMIA Y/O ASIMETRÍA TÉRMICA SIGNIFICATIVA ENTRE AMBAS MAMAS. ACUDE A VALORACIÓN MÉDICA.")
+                st.error(f"**ALERTA TÉRMICA: ANOMALÍA DETECTADA (PROBABILIDAD DE ENFERMEDAD: {riesgo*100:.1f}%)**\n\nSE DETECTARON REDES VASCULARES HIPERTÉRMICAS Y/O ASIMETRÍA TÉRMICA SIGNIFICATIVA ENTRE AMBAS MAMAS. ACUDE A VALORACIÓN MÉDICA.")
             else:
-                nivel = "RIESGO PREVENTIVO MODERADO-BAJO (VIGILANCIA)" if riesgo >= 0.22 else "RIESGO PREVENTIVO MÍNIMO (RUTINARIO)"
+                nivel = "RIESGO PREVENTIVO MODERADO-BAJO (VIGILANCIA)" if riesgo >= 0.24 else "RIESGO PREVENTIVO MÍNIMO (RUTINARIO)"
                 st.success(f"**DIAGNÓSTICO ACTUAL: NO ENFERMA / NORMAL (CONFIANZA: {(1-riesgo)*100:.1f}%)**\n\n**POSIBILIDAD ESTIMADA DE DESARROLLAR ENFERMEDAD: {riesgo*100:.1f}% — {nivel}**")
         with cb:
             st.download_button("DESCARGAR INFORME CLÍNICO PDF", crear_pdf(nombre_pac, fmt, anomalia, riesgo, df_bio, img_bgr, img_color), f"INFORME_{datetime.now().strftime('%Y%m%d')}.pdf", "application/pdf")
