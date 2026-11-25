@@ -4,6 +4,7 @@ import joblib
 import numpy as np
 import pandas as pd
 from scipy.stats import skew
+from skimage.feature import hog, local_binary_pattern
 from fpdf import FPDF
 import fitz
 import pydicom
@@ -33,7 +34,7 @@ section[data-testid="stSidebar"] { background-color: #EAE3EB !important; border-
 .purple-card div { color: #FFFFFF !important; }
 .bold-title { font-family: 'Special Elite', monospace !important; font-weight: 900 !important; font-size: 19px !important; color: #2E1D33 !important; display: block; }
 .sec-title { font-family: 'Special Elite', monospace !important; font-weight: 900 !important; font-size: 15px !important; color: #3A243F !important; margin-bottom: 8px; display: block; }
-.pill { background-color: #F7F3EE; border-radius: 12px; padding: 10px 12px; margin-bottom: 8px; border: 1px solid #DDD3DE; font-size: 12px; }
+.pill { background-color: #F7F3EE; border-radius: 12px; padding: 11px 14px; margin-bottom: 8px; border: 1px solid #DDD3DE; font-size: 12px; line-height: 1.45; }
 .stDownloadButton > button {
     background-color: #7D6283 !important;
     color: #FFFFFF !important;
@@ -77,99 +78,143 @@ def leer_estudio(archivo):
         bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
         return bgr, f"IMAGEN (.{nombre.split('.')[-1].upper()})"
 
-def extraer_mapa_temperatura_flir(img_bgr):
-    gris_temp = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-    mask = (gris_temp > 20).astype(np.uint8)
-    coords = cv2.findNonZero(mask)
+def extraer_y_predecir_flir(img_bgr):
+    gris_tmp = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    coords = cv2.findNonZero((gris_tmp > 20).astype(np.uint8))
     if coords is not None:
         x, y, w, h = cv2.boundingRect(coords)
         if w > 50 and h > 50:
             img_bgr = img_bgr[y:y+h, x:x+w]
 
     alto, ancho = img_bgr.shape[:2]
-    # Recortar textos superiores FLIR (14%), barra inferior FLIR (14%) y escala lateral derecha (14%)
-    recorte_bgr = img_bgr[int(alto * 0.14):int(alto * 0.86), int(ancho * 0.14):int(ancho * 0.84)]
+    roi_bgr = img_bgr[int(alto * 0.14):int(alto * 0.86), int(ancho * 0.14):int(ancho * 0.84)]
+    roi_128 = cv2.resize(roi_bgr, (128, 128))
 
-    b, g, r = cv2.split(recorte_bgr)
-    diferencia_color = float(np.mean(np.abs(r.astype(float) - b.astype(float))))
+    hsv = cv2.cvtColor(roi_128, cv2.COLOR_BGR2HSV)
+    h_ch, s_ch, v_ch = cv2.split(hsv)
+    hue_norm = h_ch.astype(float)
+    hue_norm[hue_norm > 145] = 0.0
+    mapa_calor = np.clip(255.0 - (hue_norm * 2.15), 0, 255)
+    mapa_calor[(s_ch < 80) & (v_ch > 185)] = 255.0
+    mapa_calor[v_ch < 45] = 0.0
+    term = cv2.GaussianBlur(mapa_calor.astype(np.uint8), (3, 3), 0)
 
-    if diferencia_color > 18.0:
-        hsv = cv2.cvtColor(recorte_bgr, cv2.COLOR_BGR2HSV)
-        h_ch, s_ch, v_ch = cv2.split(hsv)
-        hue_norm = h_ch.astype(float)
-        hue_norm[hue_norm > 145] = 0.0
-        mapa_calor = np.clip(255.0 - (hue_norm * 2.15), 0, 255)
-        mascara_blanco = (s_ch < 80) & (v_ch > 185)
-        mapa_calor[mascara_blanco] = 255.0
-        mapa_calor[v_ch < 45] = 0.0
-        img_termica = mapa_calor.astype(np.uint8)
-    else:
-        gris = cv2.cvtColor(recorte_bgr, cv2.COLOR_BGR2GRAY)
-        img_termica = (255 - gris) if np.mean(gris) > 125 else gris
+    t_med, t_max, t_min, t_std = float(np.mean(term)), float(np.max(term)), float(np.min(term)), float(np.std(term))
+    p75, p90, p95 = float(np.percentile(term, 75)), float(np.percentile(term, 90)), float(np.percentile(term, 95))
+    ratio = float(np.sum(term > 210) / term.size)
 
-    return img_termica
-
-def analizar_termografia(img_bgr):
-    img_calor = extraer_mapa_temperatura_flir(img_bgr)
-    img_128 = cv2.resize(img_calor, (128, 128))
-    suave = cv2.GaussianBlur(img_128, (3, 3), 0)
-
-    t_med = float(np.mean(suave))
-    t_max = float(np.max(suave))
-    t_min = float(np.min(suave))
-    t_std = float(np.std(suave))
-    p75 = float(np.percentile(suave, 75))
-    p90 = float(np.percentile(suave, 90))
-    p95 = float(np.percentile(suave, 95))
-    ratio = float(np.sum(suave > 215) / suave.size)
-
-    # Región mamaria glandular (excluyendo pliegue inframamario inferior y cuello)
-    glandula = suave[28:92, 16:112]
+    glandula = term[28:96, 14:114]
     mitad = glandula.shape[1] // 2
     izq, der = glandula[:, :mitad], np.fliplr(glandula[:, mitad:])
-
-    # 1. Asimetría píxel a píxel estructural entre mama izquierda y derecha
-    dif_estructural = float(np.mean(np.abs(izq.astype(float) - der.astype(float))))
     asim_med = float(abs(np.mean(izq) - np.mean(der)))
     asim_max = float(abs(np.percentile(izq, 95) - np.percentile(der, 95)))
+    asim_est = float(np.mean(np.abs(izq.astype(float) - der.astype(float))))
 
-    # 2. Actividad vascular / focos hipertermicos intraglandulares (redes rojas/blancas)
-    hiper_glandula = float(np.sum(glandula > 218) / glandula.size)
-    laplaciano = float(np.var(cv2.Laplacian(glandula, cv2.CV_64F)))
-
-    sx = cv2.Sobel(suave, cv2.CV_64F, 1, 0, ksize=3)
-    sy = cv2.Sobel(suave, cv2.CV_64F, 0, 1, ksize=3)
+    sx = cv2.Sobel(term, cv2.CV_64F, 1, 0, ksize=3)
+    sy = cv2.Sobel(term, cv2.CV_64F, 0, 1, ksize=3)
     grad = float(np.mean(np.sqrt(sx**2 + sy**2)))
-    skw = float(skew(suave.flatten()))
+    skw = float(skew(term.flatten()))
+    lap = float(np.var(cv2.Laplacian(glandula, cv2.CV_64F)))
 
-    cols = ['Temp_Media','Temp_Max','Temp_Min','Desv_Estandar','Percentil_75','Percentil_90','Percentil_95','Ratio_Puntos_Calientes','Asimetria_Bilateral_Media','Asimetria_Bilateral_Max','Gradiente_Vascular','Skewness_Termico']
-    df = pd.DataFrame([[t_med, t_max, t_min, t_std, p75, p90, p95, ratio, asim_med, asim_max, grad, skw]], columns=cols)
+    bio = [t_med, t_max, t_min, t_std, p75, p90, p95, ratio, asim_med, asim_max, asim_est, grad, skw, lap]
 
-    prob_svm = float(modelo.predict_proba(escalador.transform(df))[0][1])
+    gland_hsv = hsv[28:96, 14:114]
+    hist_h = cv2.calcHist([gland_hsv], [0], None, [16], [0, 180]).flatten()
+    hist_s = cv2.calcHist([gland_hsv], [1], None, [8], [0, 256]).flatten()
+    hist_v = cv2.calcHist([gland_hsv], [2], None, [8], [0, 256]).flatten()
+    hist_hsv = np.concatenate([hist_h, hist_s, hist_v])
+    hist_hsv = hist_hsv / (np.sum(hist_hsv) + 1e-7)
 
-    # Combinación calibrada con patrones FLIR reales (asimetría estructural + vascularización intraglandular)
-    score_asim = min(1.0, (dif_estructural / 42.0) * 0.55 + (asim_med / 22.0) * 0.45)
-    score_vasc = min(1.0, (hiper_glandula / 0.38) * 0.60 + (laplaciano / 950.0) * 0.40)
-    score_anatomico = 0.55 * score_asim + 0.45 * score_vasc
+    lbp = local_binary_pattern(glandula, P=8, R=1, method='uniform')
+    hist_lbp, _ = np.histogram(lbp.ravel(), bins=10, range=(0, 10), density=True)
 
-    riesgo_final = min(0.985, max(0.04, 0.30 * prob_svm + 0.70 * score_anatomico))
+    hog_feat = hog(
+        cv2.resize(glandula, (64, 64)),
+        orientations=8,
+        pixels_per_cell=(16, 16),
+        cells_per_block=(2, 2),
+        feature_vector=True
+    )
 
-    return df, riesgo_final, suave
+    vector_completo = np.concatenate([bio, hist_hsv, hist_lbp, hog_feat]).reshape(1, -1)
+    prob_enfermedad = float(modelo.predict_proba(escalador.transform(vector_completo))[0][1])
 
-def crear_pdf(paciente, fmt, anomalia, riesgo, df_bio, img_orig_bgr, img_c):
+    cols_tabla = [
+        'Temp_Media', 'Temp_Max', 'Temp_Min', 'Desv_Estandar',
+        'Percentil_75', 'Percentil_90', 'Percentil_95', 'Ratio_Puntos_Calientes',
+        'Asimetria_Bilateral_Media', 'Asimetria_Bilateral_Max', 'Gradiente_Vascular', 'Skewness_Termico'
+    ]
+    df_tabla = pd.DataFrame([[t_med, t_max, t_min, t_std, p75, p90, p95, ratio, asim_med, asim_max, grad, skw]], columns=cols_tabla)
+
+    return df_tabla, prob_enfermedad, term
+
+def generar_explicacion_clinica(df_bio, riesgo, anomalia):
+    asim_m = df_bio['Asimetria_Bilateral_Media'].values[0]
+    asim_x = df_bio['Asimetria_Bilateral_Max'].values[0]
+    grad = df_bio['Gradiente_Vascular'].values[0]
+    ratio = df_bio['Ratio_Puntos_Calientes'].values[0] * 100
+    t_med = df_bio['Temp_Media'].values[0]
+
+    factores = []
+    if asim_m > 12.0 or asim_x > 25.0:
+        factores.append(f"UNA DIFERENCIA TÉRMICA NOTABLE ENTRE LA MAMA IZQUIERDA Y LA DERECHA (ASIMETRÍA MEDIA DE {asim_m:.1f} U.T. Y PICO DE {asim_x:.1f} U.T.), LO CUAL SUGIERE MAYOR ACTIVIDAD METABÓLICA EN UNO DE LOS LADOS")
+    else:
+        factores.append(f"UN EQUILIBRIO TÉRMICO ESTABLE ENTRE AMBAS MAMAS (ASIMETRÍA MEDIA BAJA DE {asim_m:.1f} U.T.), COMPORTAMIENTO HABITUAL EN TEJIDO MAMARIO SANO Y SIMÉTRICO")
+
+    if grad > 22.0:
+        factores.append(f"UN TRAZADO VASCULAR MARCADO (GRADIENTE DE {grad:.1f}), QUE INDICA PRESENCIA DE VASOS SANGUÍNEOS SUPERFICIALES ACTIVOS O POSIBLE ANGIOGÉNESIS LOCAL")
+    else:
+        factores.append(f"UNA IRRIGACIÓN SANGUÍNEA SUPERFICIAL UNIFORME SIN RAMIFICACIONES VASCULARES ABRUPTAS (GRADIENTE DE {grad:.1f})")
+
+    if ratio > 18.0:
+        factores.append(f"UNA CONCENTRACIÓN ELEVADA DE PUNTOS DE MÁXIMO CALOR ({ratio:.1f}% DEL ÁREA EVALUADA)")
+    else:
+        factores.append(f"UNA DISTRIBUCIÓN CONTROLADA DE ZONAS CÁLIDAS ({ratio:.1f}% DEL ÁREA), DENTRO DE RANGOS FISIOLÓGICOS ESPERADOS")
+
+    por_que_prob = (
+        f"¿POR QUÉ TIENES UNA PROBABILIDAD DEL {riesgo*100:.1f}%? EL MODELO COMPUTACIONAL ANALIZÓ LA TEXTURA VASCULAR, EL COLOR TÉRMICO Y LA SIMETRÍA DE TU ESTUDIO, IDENTIFICANDO: "
+        + "; ".join(factores) + "."
+    )
+
+    if anomalia:
+        recomendacion = (
+            "INTERPRETACIÓN CLÍNICA: ESTE PORCENTAJE SUPERA EL UMBRAL DE VIGILANCIA PORQUE SE OBSERVAN FOCOS DE CALOR LOCALIZADO O ASIMETRÍA ENTRE AMBOS SENOS. "
+            "ESTO NO CONFIRMA UN DIAGNÓSTICO DE CÁNCER, PERO INDICA ACTIVIDAD TÉRMICA QUE DEBE SER REVISADA POR UN MÉDICO MEDIANTE ULTRASONIDO O MASTOGRAFÍA."
+        )
+    else:
+        recomendacion = (
+            f"INTERPRETACIÓN CLÍNICA: TU ESTUDIO NO MUESTRA SIGNOS DE ANOMALÍA ACTIVA (CONFIANZA DE NORMALIDAD DEL {(1-riesgo)*100:.1f}%). "
+            f"EL {riesgo*100:.1f}% CORRESPONDE A TU ÍNDICE DE RIESGO LATENTE PREVENTIVO BASADO EN VARIACIONES TÉRMICAS NORMALES DEL TEJIDO (TEMPERATURA MEDIA DE {t_med:.1f} U.T.). SE RECOMIENDA CONTINUAR CON TU AUTOEXPLORACIÓN MENSUAL."
+        )
+
+    guia_parametros = [
+        ("TEMP_MEDIA / MAX / MIN", f"{t_med:.1f} / {df_bio['Temp_Max'].values[0]:.1f} / {df_bio['Temp_Min'].values[0]:.1f}", "NIVEL GENERAL DE RADIACIÓN INFRARROJA CAPTADA EN LA PIEL; REFLEJA EL FLUJO SANGUÍNEO SUPERFICIAL."),
+        ("DESV_ESTANDAR", f"{df_bio['Desv_Estandar'].values[0]:.2f}", "MIDE QUÉ TAN PAREJA ES LA TEMPERATURA; VALORES ALTOS INDICAN CAMBIOS BRUSCOS ENTRE ZONAS FRÍAS Y CALIENTES."),
+        ("PERCENTILES 75 / 90 / 95", f"{df_bio['Percentil_75'].values[0]:.1f} / {df_bio['Percentil_90'].values[0]:.1f} / {df_bio['Percentil_95'].values[0]:.1f}", "UMBRALES DE LAS ZONAS MÁS CÁLIDAS DEL SENO; PERMITEN DETECTAR FOCOS HIPERTÉRMICOS CONCENTRADOS."),
+        ("RATIO_PUNTOS_CALIENTES", f"{ratio:.1f}%", "PORCENTAJE DEL TEJIDO QUE ALCANZA TEMPERATURAS ELEVADAS RESPECTO AL RESTO DEL TÓRAX."),
+        ("ASIMETRIA_BILATERAL", f"MEDIA {asim_m:.1f} | MÁX {asim_x:.1f}", "COMPARA EL SENO IZQUIERDO CONTRA EL DERECHO; EN CONDICIONES SANAS AMBOS DEBEN TENER UN PATRÓN SIMILAR."),
+        ("GRADIENTE_VASCULAR", f"{grad:.2f}", "MIDE LA INTENSIDAD DE LOS BORDES TÉRMICOS DE LAS VENAS; LOS TUMORES SUELEN GENERAR NUEVOS VASOS (ANGIOGÉNESIS)."),
+        ("SKEWNESS_TERMICO", f"{df_bio['Skewness_Termico'].values[0]:.2f}", "INDICA SI LA IMAGEN TIENDE HACIA TONOS CÁLIDOS O FRÍOS EN SU DISTRIBUCIÓN GLOBAL.")
+    ]
+
+    return por_que_prob, recomendacion, guia_parametros
+
+def crear_pdf(paciente, fmt, anomalia, riesgo, df_bio, img_orig_bgr, img_c, por_que_prob, recomendacion, guia_parametros):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_fill_color(141, 116, 146)
-    pdf.rect(0, 0, 210, 35, 'F')
+    pdf.rect(0, 0, 210, 32, 'F')
     pdf.set_text_color(255, 255, 255)
-    pdf.set_font("Courier", "B", 15)
-    pdf.cell(0, 14, "INFORME DE EVALUACION TERMOGRAFICA MAMARIA", ln=True, align="C")
+    pdf.set_font("Courier", "B", 14)
+    pdf.cell(0, 12, "INFORME DE EVALUACION TERMOGRAFICA MAMARIA", ln=True, align="C")
     pdf.set_font("Courier", "", 9)
-    pdf.cell(0, 6, "SISTEMA DE APOYO PREVENTIVO (MODELO SVM + BIOMARCADORES DMR-IR)", ln=True, align="C")
-    pdf.ln(12)
+    pdf.cell(0, 6, "SISTEMA DE APOYO PREVENTIVO (MODELO CALIBRADO HSV+HOG+LBP - DMR-IR)", ln=True, align="C")
+    pdf.ln(10)
+
     pdf.set_text_color(46, 29, 51)
     pdf.set_font("Courier", "B", 10)
     pdf.cell(0, 7, f"PACIENTE: {paciente.upper() if paciente else 'NO ESPECIFICADO'} | FECHA: {datetime.now().strftime('%d/%m/%Y')}", ln=True)
+
     if anomalia:
         pdf.set_fill_color(255, 224, 230)
         pdf.set_text_color(160, 20, 40)
@@ -179,22 +224,36 @@ def crear_pdf(paciente, fmt, anomalia, riesgo, df_bio, img_orig_bgr, img_c):
         pdf.set_text_color(27, 94, 32)
         txt = f"RESULTADO: NO ENFERMA | POSIBILIDAD LATENTE DE RIESGO: {riesgo*100:.1f}%"
     pdf.multi_cell(0, 8, txt, fill=True)
-    pdf.ln(4)
+    pdf.ln(3)
+
+    pdf.set_text_color(40, 40, 40)
+    pdf.set_font("Courier", "", 8)
+    pdf.multi_cell(0, 4.5, por_que_prob)
+    pdf.ln(2)
+    pdf.set_font("Courier", "B", 8)
+    pdf.multi_cell(0, 4.5, recomendacion)
+    pdf.ln(3)
+
     with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tg, tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tc:
         cv2.imwrite(tg.name, img_orig_bgr)
         cv2.imwrite(tc.name, img_c)
         pg, pc = tg.name, tc.name
     y = pdf.get_y()
-    pdf.image(pg, x=22, y=y, w=65)
-    pdf.image(pc, x=122, y=y, w=65)
-    pdf.ln(68)
+    pdf.image(pg, x=25, y=y, w=58)
+    pdf.image(pc, x=125, y=y, w=58)
+    pdf.ln(60)
     os.remove(pg)
     os.remove(pc)
-    pdf.set_text_color(40, 40, 40)
-    pdf.set_font("Courier", "", 9)
-    for col in df_bio.columns:
-        pdf.cell(130, 6, f" - {col.upper()}", border=1)
-        pdf.cell(50, 6, f"{df_bio.iloc[0][col]:.3f}", border=1, ln=True, align="R")
+
+    pdf.set_font("Courier", "B", 9)
+    pdf.cell(0, 6, "EXPLICACION DE BIOMARCADORES TERMICOS EVALUADOS:", ln=True)
+    pdf.set_font("Courier", "", 7.5)
+    for nombre_p, val_p, desc_p in guia_parametros:
+        pdf.set_font("Courier", "B", 7.5)
+        pdf.cell(0, 4.5, f"* {nombre_p} [{val_p}]:", ln=True)
+        pdf.set_font("Courier", "", 7.5)
+        pdf.multi_cell(0, 4, f"  {desc_p}")
+
     return bytes(pdf.output())
 
 st.sidebar.markdown("<div style='text-align:center; padding:8px;'><b style='font-size:18px;'>PINKTHERMO</b><br><span style='font-size:11px;'>PANEL DE DIAGNÓSTICO</span></div>", unsafe_allow_html=True)
@@ -204,15 +263,16 @@ paleta = st.sidebar.selectbox("PALETA TÉRMICA:", ["JET (MÉDICO CLÁSICO)", "IN
 umbral = st.sidebar.slider("UMBRAL DE ALERTA CLÍNICA (%):", 35, 65, 45, 1) / 100.0
 st.sidebar.markdown("<div class='pill'><b>AUTOEXPLORACIÓN:</b> REALÍZALA 7 DÍAS DESPUÉS DE TU PERIODO.</div>", unsafe_allow_html=True)
 
-st.markdown(f"<div class='main-banner'><span class='bold-title'>HOLA, {nombre_pac if nombre_pac else 'BIENVENIDA'} — EVALUACIÓN PREVENTIVA MAMARIA</span><span>SISTEMA DE DETECCIÓN TEMPRANA Y ESTRATIFICACIÓN DE RIESGO (SVM + DMR-IR)</span></div>", unsafe_allow_html=True)
+st.markdown(f"<div class='main-banner'><span class='bold-title'>HOLA, {nombre_pac if nombre_pac else 'BIENVENIDA'} — EVALUACIÓN PREVENTIVA MAMARIA</span><span>MODELO MULTIDIMENSIONAL CALIBRADO (VISIÓN ARTIFICIAL + BIOMARCADORES DMR-IR)</span></div>", unsafe_allow_html=True)
 
 if archivo is not None:
     img_bgr, fmt = leer_estudio(archivo)
     if img_bgr is not None:
-        df_bio, riesgo, img_cal = analizar_termografia(img_bgr)
+        df_bio, riesgo, img_cal = extraer_y_predecir_flir(img_bgr)
         cmap = cv2.COLORMAP_JET if "JET" in paleta else (cv2.COLORMAP_INFERNO if "INFERNO" in paleta else (cv2.COLORMAP_HOT if "HOT" in paleta else cv2.COLORMAP_VIRIDIS))
         img_color = cv2.applyColorMap(img_cal, cmap)
         anomalia = riesgo >= umbral
+        por_que_prob, recomendacion, guia_parametros = generar_explicacion_clinica(df_bio, riesgo, anomalia)
 
         c1, c2, c3 = st.columns([1.2, 1.2, 0.9])
         with c1:
@@ -232,19 +292,31 @@ if archivo is not None:
                 <div class='purple-card'><div>SIMETRÍA BILATERAL</div><div style='font-size:22px; font-weight:900;'>{sim}%</div></div>
             </div>""", unsafe_allow_html=True)
 
-        st.markdown("<div class='dash-card'><span class='sec-title'>DICTAMEN DEL ANÁLISIS COMPUTACIONAL</span>", unsafe_allow_html=True)
+        st.markdown("<div class='dash-card'><span class='sec-title'>DICTAMEN DEL ANÁLISIS Y EXPLICACIÓN DE RESULTADOS</span>", unsafe_allow_html=True)
         cr, cb = st.columns([1.6, 1.0])
         with cr:
             if anomalia:
-                st.error(f"**ALERTA TÉRMICA: ANOMALÍA DETECTADA (PROBABILIDAD DE ENFERMEDAD: {riesgo*100:.1f}%)**\n\nSE DETECTARON REDES VASCULARES HIPERTÉRMICAS Y/O ASIMETRÍA TÉRMICA SIGNIFICATIVA ENTRE AMBAS MAMAS. ACUDE A VALORACIÓN MÉDICA.")
+                st.error(f"**ALERTA TÉRMICA: ANOMALÍA DETECTADA (PROBABILIDAD DE ENFERMEDAD: {riesgo*100:.1f}%)**")
             else:
-                nivel = "RIESGO PREVENTIVO MODERADO-BAJO (VIGILANCIA)" if riesgo >= 0.24 else "RIESGO PREVENTIVO MÍNIMO (RUTINARIO)"
-                st.success(f"**DIAGNÓSTICO ACTUAL: NO ENFERMA / NORMAL (CONFIANZA: {(1-riesgo)*100:.1f}%)**\n\n**POSIBILIDAD ESTIMADA DE DESARROLLAR ENFERMEDAD: {riesgo*100:.1f}% — {nivel}**")
+                nivel = "RIESGO PREVENTIVO MODERADO-BAJO (VIGILANCIA)" if riesgo >= 0.25 else "RIESGO PREVENTIVO MÍNIMO (RUTINARIO)"
+                st.success(f"**DIAGNÓSTICO ACTUAL: NO ENFERMA / NORMAL (CONFIANZA: {(1-riesgo)*100:.1f}%) — {nivel}**")
+
+            st.markdown(f"<div class='pill'><b>¿POR QUÉ OBTUVISTE ESTE PORCENTAJE?</b><br>{por_que_prob}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='pill'><b>¿QUÉ SIGNIFICA PARA TU SALUD?</b><br>{recomendacion}</div>", unsafe_allow_html=True)
+
         with cb:
-            st.download_button("DESCARGAR INFORME CLÍNICO PDF", crear_pdf(nombre_pac, fmt, anomalia, riesgo, df_bio, img_bgr, img_color), f"INFORME_{datetime.now().strftime('%Y%m%d')}.pdf", "application/pdf")
+            st.download_button(
+                "DESCARGAR INFORME CLÍNICO PDF EXPLICADO",
+                crear_pdf(nombre_pac, fmt, anomalia, riesgo, df_bio, img_bgr, img_color, por_que_prob, recomendacion, guia_parametros),
+                f"INFORME_{datetime.now().strftime('%Y%m%d')}.pdf",
+                "application/pdf"
+            )
+            st.markdown("<div class='pill'><b>NOTA MÉDICA:</b> ESTE ANÁLISIS ES UNA HERRAMIENTA DE TAMIZAJE PREVENTIVO Y NO SUSTITUYE UNA MASTOGRAFÍA O ULTRASONIDO.</div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
-        with st.expander("VER TABLA DE LOS 12 BIOMARCADORES"):
-            st.dataframe(df_bio.round(3), use_container_width=True)
+
+        with st.expander("VER EXPLICACIÓN DETALLADA DE CADA PARÁMETRO TÉRMICO", expanded=True):
+            df_explicado = pd.DataFrame(guia_parametros, columns=["PARÁMETRO TÉRMICO", "VALOR MEDIDO", "¿QUÉ SIGNIFICA EN TU TERMOGRAFÍA?"])
+            st.dataframe(df_explicado, use_container_width=True, hide_index=True)
 else:
     ca, cb, cc = st.columns([1.1, 1.1, 0.9])
     with ca:
