@@ -18,32 +18,43 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&family=Special+Elite&display=swap');
 
-.stApp { background-color: #C7B3CA !important; color: #3D2B42 !important; }
+.stApp { background-color: #F7D9E3 !important; color: #4A2C2A !important; }
 .stApp p, .stApp label, .stApp li, .stApp h1, .stApp h2, .stApp h3, .stApp input, .stApp div[data-testid="stMarkdownContainer"] {
     font-family: 'Courier Prime', monospace !important;
     text-transform: uppercase !important;
+    color: #4A2C2A !important;
 }
 [data-testid="stIconMaterial"] {
     font-family: 'Material Symbols Rounded' !important;
     text-transform: none !important;
 }
-section[data-testid="stSidebar"] { background-color: #EAE3EB !important; border-right: 1px solid #D3C4D6 !important; }
-.main-banner { background-color: #F7F3EE; border-radius: 18px; padding: 18px 24px; margin-bottom: 16px; border: 1px solid #E5DDD5; }
-.dash-card { background-color: #E5DCE6; border-radius: 16px; padding: 16px; margin-bottom: 14px; border: 1px solid #D5C8D7; }
-.purple-card { background-color: #8D7492; color: #FFFFFF !important; border-radius: 14px; padding: 14px; text-align: center; margin-bottom: 10px; }
-.purple-card div { color: #FFFFFF !important; }
-.bold-title { font-family: 'Special Elite', monospace !important; font-weight: 900 !important; font-size: 19px !important; color: #2E1D33 !important; display: block; }
-.sec-title { font-family: 'Special Elite', monospace !important; font-weight: 900 !important; font-size: 15px !important; color: #3A243F !important; margin-bottom: 8px; display: block; }
-.pill { background-color: #F7F3EE; border-radius: 12px; padding: 11px 14px; margin-bottom: 8px; border: 1px solid #DDD3DE; font-size: 12px; line-height: 1.45; }
+section[data-testid="stSidebar"] { background-color: #FCEBF1 !important; border-right: 1px solid #E6B8C7 !important; }
+section[data-testid="stSidebar"] * { color: #4A2C2A !important; }
+section[data-testid="stSidebar"] input, section[data-testid="stSidebar"] select { background-color: #FFF7FA !important; color: #4A2C2A !important; }
+
+.main-banner { background-color: #FFF7FA; border-radius: 18px; padding: 18px 24px; margin-bottom: 16px; border: 1px solid #E8B8C8; }
+.dash-card { background-color: #FCE8EF; border-radius: 16px; padding: 16px; margin-bottom: 14px; border: 1px solid #E6B5C6; }
+.pink-card { background-color: #A64D6E; color: #FFF8FA !important; border-radius: 14px; padding: 14px; text-align: center; margin-bottom: 10px; border: 1px solid #8A3957; }
+.pink-card div { color: #FFF8FA !important; }
+.bold-title { font-family: 'Special Elite', monospace !important; font-weight: 900 !important; font-size: 19px !important; color: #7D2E4D !important; display: block; }
+.sec-title { font-family: 'Special Elite', monospace !important; font-weight: 900 !important; font-size: 15px !important; color: #8E3A59 !important; margin-bottom: 8px; display: block; }
+.pill { background-color: #FFF7FA; border-radius: 12px; padding: 11px 14px; margin-bottom: 8px; border: 1px solid #E8BDCC; font-size: 12px; line-height: 1.45; color: #4A2C2A !important; }
+.pill b { color: #7D2E4D !important; }
+
 .stDownloadButton > button {
-    background-color: #7D6283 !important;
-    color: #FFFFFF !important;
+    background-color: #8E3A59 !important;
+    color: #FFF8FA !important;
     border-radius: 12px !important;
+    border: none !important;
     font-family: 'Courier Prime', monospace !important;
     font-weight: 700 !important;
     text-transform: uppercase !important;
     width: 100%;
     padding: 10px 16px !important;
+}
+.stDownloadButton > button:hover {
+    background-color: #6E2942 !important;
+    color: #FFFFFF !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -205,18 +216,18 @@ def crear_pdf(paciente, fmt, anomalia, riesgo, df_bio, img_orig_bgr, img_c, por_
     pdf.set_auto_page_break(auto=True, margin=12)
     pdf.add_page()
 
-    pdf.set_fill_color(141, 116, 146)
+    pdf.set_fill_color(142, 58, 89)
     pdf.rect(0, 0, 210, 30, 'F')
-    pdf.set_text_color(255, 255, 255)
+    pdf.set_text_color(255, 248, 250)
     pdf.set_font("Courier", "B", 13)
     pdf.set_xy(12, 7)
     pdf.cell(186, 8, "INFORME DE EVALUACION TERMOGRAFICA MAMARIA", ln=True, align="C")
     pdf.set_font("Courier", "", 8.5)
     pdf.set_x(12)
-    pdf.cell(186, 6, "SISTEMA DE APOYO PREVENTIVO (MODELO CALIBRADO HSV+HOG+LBP - DMR-IR)", ln=True, align="C")
+    pdf.cell(186, 6, "PINKTHERMO - SISTEMA DE APOYO PREVENTIVO (MODELO HSV+HOG+LBP)", ln=True, align="C")
     pdf.ln(10)
 
-    pdf.set_text_color(46, 29, 51)
+    pdf.set_text_color(74, 44, 42)
     pdf.set_font("Courier", "B", 9.5)
     pdf.set_x(12)
     pdf.cell(186, 6, f"PACIENTE: {paciente.upper() if paciente else 'NO ESPECIFICADO'} | FECHA: {datetime.now().strftime('%d/%m/%Y')}", ln=True)
@@ -224,7 +235,7 @@ def crear_pdf(paciente, fmt, anomalia, riesgo, df_bio, img_orig_bgr, img_c, por_
 
     if anomalia:
         pdf.set_fill_color(255, 224, 230)
-        pdf.set_text_color(160, 20, 40)
+        pdf.set_text_color(150, 20, 45)
         txt = f"RESULTADO: ALERTA DE ANOMALIA TERMICA DETECTADA (PROBABILIDAD: {riesgo*100:.1f}%)"
     else:
         pdf.set_fill_color(232, 245, 233)
@@ -234,11 +245,12 @@ def crear_pdf(paciente, fmt, anomalia, riesgo, df_bio, img_orig_bgr, img_c, por_
     pdf.multi_cell(186, 7, txt, fill=True)
     pdf.ln(3)
 
-    pdf.set_text_color(40, 40, 40)
+    pdf.set_text_color(74, 44, 42)
     pdf.set_font("Courier", "", 8)
     pdf.set_x(12)
     pdf.multi_cell(186, 4.3, por_que_prob)
     pdf.ln(2)
+    pdf.set_text_color(125, 46, 77)
     pdf.set_font("Courier", "B", 8)
     pdf.set_x(12)
     pdf.multi_cell(186, 4.3, recomendacion)
@@ -257,7 +269,7 @@ def crear_pdf(paciente, fmt, anomalia, riesgo, df_bio, img_orig_bgr, img_c, por_
     os.remove(pc)
 
     pdf.set_font("Courier", "B", 9)
-    pdf.set_text_color(46, 29, 51)
+    pdf.set_text_color(142, 58, 89)
     pdf.set_x(12)
     pdf.cell(186, 6, "EXPLICACION DE BIOMARCADORES TERMICOS EVALUADOS:", ln=True)
     pdf.ln(1)
@@ -265,17 +277,17 @@ def crear_pdf(paciente, fmt, anomalia, riesgo, df_bio, img_orig_bgr, img_c, por_
     for nombre_p, val_p, desc_p in guia_parametros:
         pdf.set_x(12)
         pdf.set_font("Courier", "B", 7.8)
-        pdf.set_text_color(46, 29, 51)
+        pdf.set_text_color(125, 46, 77)
         pdf.multi_cell(186, 4.2, f"* {nombre_p} [{val_p}]:")
         pdf.set_x(15)
         pdf.set_font("Courier", "", 7.5)
-        pdf.set_text_color(60, 60, 60)
+        pdf.set_text_color(74, 44, 42)
         pdf.multi_cell(183, 4.0, desc_p)
         pdf.ln(0.8)
 
     return bytes(pdf.output())
 
-st.sidebar.markdown("<div style='text-align:center; padding:8px;'><b style='font-size:18px;'>PINKTHERMO</b><br><span style='font-size:11px;'>PANEL DE DIAGNÓSTICO</span></div>", unsafe_allow_html=True)
+st.sidebar.markdown("<div style='text-align:center; padding:8px;'><b style='font-size:19px; color:#8E3A59;'>PINKTHERMO</b><br><span style='font-size:11px; color:#4A2C2A;'>PANEL DE DIAGNÓSTICO</span></div>", unsafe_allow_html=True)
 nombre_pac = st.sidebar.text_input("NOMBRE DE LA PACIENTE:", placeholder="EJ. SOFIA THOMPSON")
 archivo = st.sidebar.file_uploader("SUBIR ESTUDIO TERMOGRÁFICO:", type=["jpg","jpeg","png","bmp","tif","tiff","pdf","dcm"])
 paleta = st.sidebar.selectbox("PALETA TÉRMICA:", ["JET (MÉDICO CLÁSICO)", "INFERNO (ALTO CONTRASTE)", "HOT (CÁLIDO)", "VIRIDIS (SUAVE)"])
@@ -306,9 +318,9 @@ if archivo is not None:
             sim = max(5, int(round(100 - df_bio['Asimetria_Bilateral_Media'].values[0] * 2.0)))
             st.markdown(f"""
             <div class='dash-card'><span class='sec-title'>PROBABILIDADES</span>
-                <div class='purple-card'><div>POSIBILIDAD DE ENFERMEDAD</div><div style='font-size:26px; font-weight:900;'>{riesgo*100:.1f}%</div></div>
-                <div class='purple-card'><div>ESTADO SIN ANOMALÍA</div><div style='font-size:26px; font-weight:900;'>{(1-riesgo)*100:.1f}%</div></div>
-                <div class='purple-card'><div>SIMETRÍA BILATERAL</div><div style='font-size:22px; font-weight:900;'>{sim}%</div></div>
+                <div class='pink-card'><div>POSIBILIDAD DE ENFERMEDAD</div><div style='font-size:26px; font-weight:900;'>{riesgo*100:.1f}%</div></div>
+                <div class='pink-card'><div>ESTADO SIN ANOMALÍA</div><div style='font-size:26px; font-weight:900;'>{(1-riesgo)*100:.1f}%</div></div>
+                <div class='pink-card'><div>SIMETRÍA BILATERAL</div><div style='font-size:22px; font-weight:900;'>{sim}%</div></div>
             </div>""", unsafe_allow_html=True)
 
         st.markdown("<div class='dash-card'><span class='sec-title'>DICTAMEN DEL ANÁLISIS Y EXPLICACIÓN DE RESULTADOS</span>", unsafe_allow_html=True)
@@ -343,4 +355,4 @@ else:
     with cb:
         st.markdown("<div class='dash-card'><span class='sec-title'>GUÍA DE PREVENCIÓN</span><div class='pill'><b>DETECCIÓN TEMPRANA:</b> REALIZA TU AUTOEXPLORACIÓN MENSUAL Y SUBE TU ESTUDIO TERMOGRÁFICO EN EL PANEL IZQUIERDO PARA EVALUAR TU RIESGO.</div></div>", unsafe_allow_html=True)
     with cc:
-        st.markdown("<div class='dash-card'><span class='sec-title'>IMPACTO CLÍNICO</span><div class='purple-card'><div>CURACIÓN TEMPRANA</div><div style='font-size:28px; font-weight:900;'>95%</div></div><div class='purple-card'><div>RADIACIÓN INVASIVA</div><div style='font-size:28px; font-weight:900;'>0%</div></div></div>", unsafe_allow_html=True)
+        st.markdown("<div class='dash-card'><span class='sec-title'>IMPACTO CLÍNICO</span><div class='pink-card'><div>CURACIÓN TEMPRANA</div><div style='font-size:28px; font-weight:900;'>95%</div></div><div class='pink-card'><div>RADIACIÓN INVASIVA</div><div style='font-size:28px; font-weight:900;'>0%</div></div></div>", unsafe_allow_html=True)
